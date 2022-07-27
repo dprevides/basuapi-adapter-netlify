@@ -1,0 +1,23 @@
+import {JSONAPIDataResponse } from '@basuapi/api';
+{% for item in item.imports %}
+{{ item }}
+{% endfor %}
+
+
+{% for m in methods %}
+export default async (request: Request, context: any) => {
+  const method = request.method;
+  if (request.method === "{{ m.item.method }}"){
+    const result = await {{routeMethod}}{{m.routePath}}.{{m.method}}(getParamData(request)) as any as JSONAPIDataResponse;
+
+    return context.json(result.data);
+  }else{
+    return context.json({ success: false, message: "Method not available" });
+  }
+  
+};
+{% endfor %}
+
+const getParamData = (req:Request) => {
+  return {...req};
+}
