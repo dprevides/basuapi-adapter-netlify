@@ -1,0 +1,21 @@
+const path = require('path');
+
+module.exports = {
+  mode: 'development', 
+  devtool: 'cheap-module-source-map',
+  entry: {
+  {% for item in items %}
+    {{ item.name }}: '{{ item.value }}',
+  {% endfor %}    
+  },
+  output: {
+    filename: '_[name].js',
+    path: path.resolve(__dirname, 'netlify','edge-functions'),
+    library: {
+      type: "module",
+    },
+  },
+  experiments: {
+    outputModule: true,
+  },
+};

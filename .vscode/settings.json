@@ -7,7 +7,8 @@
   "typescript.enablePromptUseWorkspaceTsdk": true,
   "deno.enable": true,
   "deno.enablePaths": [
-    "netlify/edge-functions"
+    "netlify/edge-functions",
+    "adapters/adapter-netlify-edge/netlify/edge-functions"
   ],
   "deno.unstable": true,
   "deno.importMap": ".netlify/edge-functions-import-map.json"

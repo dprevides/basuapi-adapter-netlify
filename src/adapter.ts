@@ -5,6 +5,7 @@ import fs from 'fs';
 import path from 'path';
 import nunjucks from 'nunjucks';
 
+const appName = "adapter-netlify-edge";
 class AdapterConfig extends BaseConfig {
   prefix: string 
 }
@@ -28,9 +29,16 @@ class CustomAdapter extends BaseAdapter<AdapterConfig> {
 
     packageInfo.scripts = {
       ...packageInfo.scripts,
-      "create:netlify:folder": "mkdir -p netlify/edge-functions && cp -fr api/* netlify/edge-functions",
-      build: `yarn clean && yarn create:public:folder && swc src -d api && yarn create:netlify:folder`
+      "create:netlify:folder": "mkdir -p netlify/edge-functions && npx webpack --config webpack.config.js ",
+      build: `yarn clean && yarn create:public:folder && swc src -d api && yarn create:netlify:folder`,
+      start: 'netlify dev',
+      'start:debug': 'netlify dev'
+    }
 
+    packageInfo.devDependencies = {
+      ...packageInfo.devDependencies,
+      "webpack": "^5.74.0",
+      "webpack-cli": "^4.10.0"
     }
 
 
@@ -38,13 +46,13 @@ class CustomAdapter extends BaseAdapter<AdapterConfig> {
   }
 
 
-
-  private async getTemplateForNetlifyConfigToml(){
-    const templatePath =  `${process.cwd()}/templates/${this.language.toLowerCase()}/netlify.njk`;
+  private async getTemplateByName(name:string){
+    const templatePath =  `${process.cwd()}/templates/${this.language.toLowerCase()}/${name}.njk`;
     if (!fs.existsSync(templatePath)){
         throw new Error(`${templatePath} does not exists. `);
     }
     return fs.readFileSync(templatePath).toString();
+
   }
 
   /**
@@ -99,6 +107,7 @@ class CustomAdapter extends BaseAdapter<AdapterConfig> {
   protected async generateFiles(classes:ApplicationDeployAdapterClassHolder[]){
     const imports:string[] = []
     const functions:{function:string, path:string}[] = [];
+    const webpackConfig:{name:string, value:string}[] = []
     const extension = this.language === 'typescript' ? 'ts' : 'js';
     for (let item of classes){
 
@@ -124,7 +133,11 @@ class CustomAdapter extends BaseAdapter<AdapterConfig> {
           });
           const fileNamePath = filePath.split('/');
           methods.push({routePath, method: method.method, item:method})
-          functions.push({function: fileNamePath[fileNamePath.length - 1]?.replace(`.${extension}`,''), path: this.config.prefix ? this.config.prefix + method.route : method.route})
+          const functionName = fileNamePath[fileNamePath.length - 1]?.replace(`.${extension}`,'');
+          const url = this.config.prefix ? this.config.prefix + method.route : method.route;
+          const pathToCompiled = `./api/${functionName}.js` //Extensions is always js because it is a compild file
+          webpackConfig.push({name: functionName, value: pathToCompiled})
+          functions.push({function: functionName, path: url})
       }
 
       //compiling template
@@ -134,16 +147,50 @@ class CustomAdapter extends BaseAdapter<AdapterConfig> {
       fs.writeFileSync(filePath, template);
     }
 
-    this.generateNetlifyConfigurationFile(functions);
+    await this.generateNetlifyConfigurationFile(functions);
+    await this.generateWebpackConfig(webpackConfig);
+    await this.generateFunctionsDefault(webpackConfig);
   }
 
 
   private async generateNetlifyConfigurationFile(functions: {function: string, path:string}[]){
-    const templateContent = await this.getTemplateForNetlifyConfigToml();
+    const templateContent = await this.getTemplateByName('netlify');
     const content = nunjucks.configure({
       autoescape: false
       }).renderString(templateContent,{functions});
     fs.writeFileSync(path.join(this.destination,'netlify.toml'),content);
+  }
+
+  private async generateWebpackConfig(config:{name:string, value:string}[]){
+    const templateContent = await this.getTemplateByName('webpack');
+    const content = nunjucks.configure({
+      autoescape: false
+      }).renderString(templateContent,{items: config});
+    fs.writeFileSync(path.join(this.destination,'webpack.config.js'),content);
+  }
+
+  private async generateFunctionsDefault(items:{name:string, value:string}[]){    
+    const templateContent = await this.getTemplateByName('netlify_default');
+    const outputFolder = path.join(this.destination,'netlify','edge-functions');
+    if (!fs.existsSync(outputFolder)){
+      fs.mkdirSync(outputFolder, { recursive: true });
+    }
+    for (let item of items){
+      const content = nunjucks.configure({
+        autoescape: false
+        }).renderString(templateContent,{name: item.name});
+        fs.writeFileSync(path.join(outputFolder,item.name+'.js'),content);
+    }
+  }
+
+  async init() : Promise<void>{
+    await super.init();
+    const buildCommand = `cd ${this.destination} && yarn build `;
+    setTimeout(() => { //BS code, must be changed on runCommand to wait for it to finish
+      this.runCommand(buildCommand);
+      console.log(`Everything is done. Run yarn adapter:${appName}:start`)
+    },3000)
+    
   }
 
 }
@@ -151,7 +198,7 @@ class CustomAdapter extends BaseAdapter<AdapterConfig> {
 
 export class TemplateAdapter extends BaseAdapterClient<AdapterConfig>{
   constructor(){
-    super("adapter-netlify-edge","A basu adapter for netlify edge functions","1.0.0",require('../package.json').name)
+    super(appName,"A basu adapter for netlify edge functions","1.0.0",require('../package.json').name)
   }
 
   protected async startAdapter(config:AdapterConfig) : Promise<void> {
@@ -163,6 +210,11 @@ export class TemplateAdapter extends BaseAdapterClient<AdapterConfig>{
 
     const customAdapter = new CustomAdapter(config);
     await customAdapter.init();
+  }
+
+  protected addExtraDataToPackageInfo(packageInfo:any,_route:string, options:{folder:string, mergedeps:string, language:string, applicationfolder:string}){
+    this.addToSection(packageInfo.scripts,`adapter:${this.name}:start`,`cd ${options.folder} && yarn build && yarn start`);
+    this.addToSection(packageInfo.scripts,`adapter:${this.name}:start:debug`,`cd ${options.folder} && yarn build && yarn start:debug`);
   }
 
 
